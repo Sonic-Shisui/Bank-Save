@@ -38,10 +38,9 @@ app.get("/bank/:uid/balance", (req, res) => {
 app.post("/save", (req, res) => {
   const { uid, amount } = req.body;
   if (!uid || !amount) {
-    return res.status(400).json({ {
+    return res.status(400).json({
   "uid": "12345",
-  "amount": 500
-} });
+  "amount": 500 });
   }
 
   const bankData = readBank();
@@ -61,10 +60,9 @@ app.post("/save", (req, res) => {
 app.get("/save", (req, res) => {
   const { uid, amount } = req.query;
   if (!uid || !amount) {
-    return res.status(400).json({ {
+    return res.status(400).json({
   "uid": "12345",
-  "amount": 500
-} });
+  "amount": 500 });
   }
 
   const bankData = readBank();
