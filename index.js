@@ -21,7 +21,7 @@ function writeBank(data) {
 
 // Route d'accueil
 app.get("/", (req, res) => {
-  res.json({ message: "UCHIWA BANK API is online!" });
+  res.json({ message: "BANK API is online!" });
 });
 
 // Obtenir le solde
@@ -85,5 +85,5 @@ app.get("/bank/top", (req, res) => {
 
 // Lancer le serveur
 app.listen(PORT, () => {
-  console.log(`UCHIWA BANK API en ligne sur http://localhost:${PORT}`);
+  console.log(`BANK API en ligne sur http://localhost:${PORT}`);
 });
