@@ -1,0 +1,15 @@
+{
+  "name": "bank-api",
+  "version": "1.0.0",
+  "description": "API Express pour gérer et conserver l'argent des utilisateurs (banque persistante)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["express", "api", "bank", "json", "uchiwa", "money", "persistent"],
+  "author": "ミ★𝐒𝐎𝐍𝐈𝐂✄𝐄𝚇𝙴 3.0★彡",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
