@@ -5,7 +5,7 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Chemin vers bank.json du repo HedgehogGPT
+// Chemin vers bank.json
 const BANK_PATH = path.resolve(__dirname, "bank.json");
 
 app.use(express.json());
@@ -24,6 +24,27 @@ function writeBank(data) {
 // Route d'accueil
 app.get("/", (req, res) => {
   res.json({ message: "BANK API is online!" });
+});
+
+// ✅ Route pour sauvegarder/créer un compte utilisateur
+app.post("/save", (req, res) => {
+  const { uid } = req.body;
+  if (!uid) {
+    return res.status(400).json({ error: "uid requis." });
+  }
+
+  const bankData = readBank();
+  if (!bankData[uid]) {
+    bankData[uid] = { bank: 0 };
+    writeBank(bankData);
+  }
+
+  res.json({
+    success: true,
+    message: "Compte sauvegardé/créé avec succès.",
+    uid,
+    bank: bankData[uid].bank
+  });
 });
 
 // Solde utilisateur
