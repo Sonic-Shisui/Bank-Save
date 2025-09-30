@@ -4,27 +4,29 @@ const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Chemin vers bank.json du repo HedgehogGPT
 const BANK_PATH = path.resolve(__dirname, "bank.json");
 
 app.use(express.json());
 
-// 📖 Lecture du fichier banque
+// Lecture des comptes
 function readBank() {
   if (!fs.existsSync(BANK_PATH)) fs.writeFileSync(BANK_PATH, "{}");
   return JSON.parse(fs.readFileSync(BANK_PATH, "utf8"));
 }
 
-// ✍️ Écriture du fichier banque
+// Écriture des comptes
 function writeBank(data) {
   fs.writeFileSync(BANK_PATH, JSON.stringify(data, null, 2));
 }
 
-// 🏦 Route d'accueil
+// Route d'accueil
 app.get("/", (req, res) => {
   res.json({ message: "BANK API is online!" });
 });
 
-// 💰 Obtenir le solde d’un utilisateur
+// Solde utilisateur
 app.get("/bank/:uid/balance", (req, res) => {
   const uid = req.params.uid;
   const bankData = readBank();
@@ -34,13 +36,11 @@ app.get("/bank/:uid/balance", (req, res) => {
   res.json({ uid, bank: bankData[uid].bank || 0 });
 });
 
-// 💾 Créer un compte ou déposer (POST)
-app.post("/save", (req, res) => {
+// Dépôt d'argent
+app.post("/bank/deposit", (req, res) => {
   const { uid, amount } = req.body;
   if (!uid || !amount) {
-    return res.status(400).json({
-  "uid": "12345",
-  "amount": 500 });
+    return res.status(400).json({ error: "uid et amount requis." });
   }
 
   const bankData = readBank();
@@ -56,29 +56,7 @@ app.post("/save", (req, res) => {
   });
 });
 
-// 💾 Créer un compte ou déposer (GET pour test navigateur)
-app.get("/save", (req, res) => {
-  const { uid, amount } = req.query;
-  if (!uid || !amount) {
-    return res.status(400).json({
-  "uid": "12345",
-  "amount": 500 });
-  }
-
-  const bankData = readBank();
-  if (!bankData[uid]) bankData[uid] = { bank: 0 };
-  bankData[uid].bank += Number(amount);
-
-  writeBank(bankData);
-
-  res.json({
-    success: true,
-    uid,
-    bank: bankData[uid].bank
-  });
-});
-
-// 💸 Retirer
+// Retrait d'argent
 app.post("/bank/withdraw", (req, res) => {
   const { uid, amount } = req.body;
   if (!uid || !amount) {
@@ -103,7 +81,7 @@ app.post("/bank/withdraw", (req, res) => {
   });
 });
 
-// 🔄 Transférer entre comptes
+// Transfert d'argent
 app.post("/bank/transfer", (req, res) => {
   const { fromUid, toUid, amount } = req.body;
   if (!fromUid || !toUid || !amount) {
@@ -134,7 +112,7 @@ app.post("/bank/transfer", (req, res) => {
   });
 });
 
-// 👑 Voir le top des plus riches
+// Top des comptes
 app.get("/bank/top", (req, res) => {
   const bankData = readBank();
   const topUsers = Object.entries(bankData)
@@ -149,7 +127,7 @@ app.get("/bank/top", (req, res) => {
   res.json({ top: topUsers });
 });
 
-// 🚀 Lancer le serveur
+// Lancer le serveur
 app.listen(PORT, () => {
   console.log(`🏦 BANK API en ligne sur http://localhost:${PORT}`);
 });
