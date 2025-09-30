@@ -34,9 +34,29 @@ app.get("/bank/:uid/balance", (req, res) => {
   res.json({ uid, bank: bankData[uid].bank || 0 });
 });
 
-// 💾 Créer un compte ou déposer (ta route /save)
+// 💾 Créer un compte ou déposer (POST)
 app.post("/save", (req, res) => {
   const { uid, amount } = req.body;
+  if (!uid || !amount) {
+    return res.status(400).json({ error: "uid et amount requis." });
+  }
+
+  const bankData = readBank();
+  if (!bankData[uid]) bankData[uid] = { bank: 0 };
+  bankData[uid].bank += Number(amount);
+
+  writeBank(bankData);
+
+  res.json({
+    success: true,
+    uid,
+    bank: bankData[uid].bank
+  });
+});
+
+// 💾 Créer un compte ou déposer (GET pour test navigateur)
+app.get("/save", (req, res) => {
+  const { uid, amount } = req.query;
   if (!uid || !amount) {
     return res.status(400).json({ error: "uid et amount requis." });
   }
