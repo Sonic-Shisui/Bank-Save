@@ -33,7 +33,7 @@ app.get("/bank/:uid/balance", (req, res) => {
 });
 
 // Créer un compte ou déposer
-app.post("/bank/save", (req, res) => {
+app.post("/save", (req, res) => {
   const { uid, amount } = req.body;
   if (!uid || !amount) return res.status(400).json({ error: "uid et amount requis." });
 
