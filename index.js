@@ -61,7 +61,10 @@ app.post("/save", (req, res) => {
 app.get("/save", (req, res) => {
   const { uid, amount } = req.query;
   if (!uid || !amount) {
-    return res.status(400).json({ error: "uid et amount requis." });
+    return res.status(400).json({ {
+  "uid": "12345",
+  "amount": 500
+} });
   }
 
   const bankData = readBank();
