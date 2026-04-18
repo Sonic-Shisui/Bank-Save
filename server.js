@@ -56,8 +56,6 @@ db.serialize(() => {
 
 const random = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
-// ========== ROUTES ==========
-
 app.get("/api/bank/:userId", (req, res) => {
     const { userId } = req.params;
     db.get("SELECT * FROM users WHERE userId = ?", [userId], async (err, user) => {
@@ -70,7 +68,6 @@ app.get("/api/bank/:userId", (req, res) => {
             return res.json({ success: true, data: { userId, bank: 0, card: null } });
         }
         const card = await new Promise((resolve) => db.get("SELECT * FROM cards WHERE userId = ?", [userId], (e, r) => resolve(r)));
-        // CORRECTION : Ajouter une vérification si card existe
         res.json({ success: true, data: { ...user, card: card || null } });
     });
 });
@@ -219,6 +216,69 @@ app.post("/api/bank/:userId/lottery", (req, res) => {
         db.get("SELECT bank FROM users WHERE userId = ?", [userId], (e, newUser) => {
             if (e) return res.status(500).json({ error: e.message });
             res.json({ success: true, win, winAmount, multiplier, userNumbers, drawnNumbers, matchCount, newBalance: newUser.bank });
+        });
+    });
+});
+
+app.post("/api/bank/:userId/gamble", (req, res) => {
+    const { userId } = req.params;
+    const { amount, choice } = req.body;
+    if (choice !== "pile" && choice !== "face") {
+        return res.json({ success: false, error: "Choix invalide (pile ou face)" });
+    }
+    db.get("SELECT bank FROM users WHERE userId = ?", [userId], (err, user) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!user || amount > user.bank) return res.json({ success: false, error: "Solde insuffisant" });
+        const result = Math.random() < 0.5 ? "pile" : "face";
+        const win = result === choice;
+        const winAmount = win ? amount * 2 : 0;
+        if (win) {
+            db.run("UPDATE users SET bank = bank + ? WHERE userId = ?", [amount, userId]);
+            db.run("INSERT INTO transactions (userId, type, amount, date, details) VALUES (?, 'gamble_win', ?, ?, ?)", 
+                [userId, winAmount, Date.now(), JSON.stringify({ choice, result, betAmount: amount })]);
+        } else {
+            db.run("UPDATE users SET bank = bank - ? WHERE userId = ?", [amount, userId]);
+            db.run("INSERT INTO transactions (userId, type, amount, date, details) VALUES (?, 'gamble_loss', ?, ?, ?)", 
+                [userId, -amount, Date.now(), JSON.stringify({ choice, result, betAmount: amount })]);
+        }
+        db.get("SELECT bank FROM users WHERE userId = ?", [userId], (e, newUser) => {
+            if (e) return res.status(500).json({ error: e.message });
+            res.json({ success: true, win, winAmount, choice, result, newBalance: newUser.bank });
+        });
+    });
+});
+
+app.post("/api/bank/:userId/transfer", (req, res) => {
+    const { userId } = req.params;
+    const { targetId, amount, cvv } = req.body;
+    if (userId === targetId) {
+        return res.json({ success: false, error: "Vous ne pouvez pas vous transférer à vous-même" });
+    }
+    db.get("SELECT * FROM cards WHERE userId = ?", [userId], (err, card) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!card || card.cardCvv !== cvv) return res.json({ success: false, error: "CVV incorrect" });
+        db.get("SELECT bank FROM users WHERE userId = ?", [userId], (e, sender) => {
+            if (e) return res.status(500).json({ error: e.message });
+            if (!sender || amount > sender.bank) return res.json({ success: false, error: "Solde insuffisant" });
+            db.get("SELECT userId FROM users WHERE userId = ?", [targetId], (e2, receiver) => {
+                if (e2) return res.status(500).json({ error: e2.message });
+                if (!receiver) {
+                    db.run("INSERT INTO users (userId, bank) VALUES (?, ?)", [targetId, 0]);
+                    db.run("INSERT INTO cards (userId) VALUES (?)", [targetId]);
+                    db.run("INSERT INTO parrainage (userId) VALUES (?)", [targetId]);
+                    db.run("INSERT INTO lottery (userId) VALUES (?)", [targetId]);
+                }
+                db.run("UPDATE users SET bank = bank - ? WHERE userId = ?", [amount, userId]);
+                db.run("UPDATE users SET bank = bank + ? WHERE userId = ?", [amount, targetId]);
+                db.run("INSERT INTO transactions (userId, type, amount, date, details) VALUES (?, 'transfer_sent', -?, ?, ?)", 
+                    [userId, amount, Date.now(), JSON.stringify({ targetId, amount })]);
+                db.run("INSERT INTO transactions (userId, type, amount, date, details) VALUES (?, 'transfer_received', ?, ?, ?)", 
+                    [targetId, amount, Date.now(), JSON.stringify({ senderId: userId, amount })]);
+                db.get("SELECT bank FROM users WHERE userId = ?", [userId], (e3, newSender) => {
+                    if (e3) return res.status(500).json({ error: e3.message });
+                    res.json({ success: true, newBalance: newSender.bank, targetId, amount });
+                });
+            });
         });
     });
 });
