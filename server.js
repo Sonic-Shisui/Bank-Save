@@ -10,12 +10,14 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Création du dossier database s'il n'existe pas
 const dbPath = path.join(__dirname, "database", "bank.db");
 const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
 const db = new sqlite3.Database(dbPath);
 
+// Initialisation des tables
 db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
         userId TEXT PRIMARY KEY, 
@@ -54,13 +56,18 @@ db.serialize(() => {
     )`);
 });
 
+// Fonction utilitaire pour générer un nombre aléatoire
 const random = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 
+// ==================== ROUTES ====================
+
+// Obtenir les données bancaires d'un utilisateur
 app.get("/api/bank/:userId", (req, res) => {
     const { userId } = req.params;
     db.get("SELECT * FROM users WHERE userId = ?", [userId], async (err, user) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!user) {
+            // Création automatique du compte si l'utilisateur n'existe pas
             db.run("INSERT INTO users (userId) VALUES (?)", [userId]);
             db.run("INSERT INTO cards (userId) VALUES (?)", [userId]);
             db.run("INSERT INTO parrainage (userId) VALUES (?)", [userId]);
@@ -72,6 +79,7 @@ app.get("/api/bank/:userId", (req, res) => {
     });
 });
 
+// Dépôt d'argent sur le compte bancaire
 app.post("/api/bank/:userId/deposit", (req, res) => {
     const { userId } = req.params;
     const { amount, cvv } = req.body;
@@ -86,6 +94,7 @@ app.post("/api/bank/:userId/deposit", (req, res) => {
     });
 });
 
+// Retrait d'argent du compte bancaire
 app.post("/api/bank/:userId/withdraw", (req, res) => {
     const { userId } = req.params;
     const { amount, cvv } = req.body;
@@ -103,6 +112,7 @@ app.post("/api/bank/:userId/withdraw", (req, res) => {
     });
 });
 
+// Création d'une carte bancaire
 app.post("/api/bank/:userId/card", (req, res) => {
     const { userId } = req.params;
     db.get("SELECT * FROM cards WHERE userId = ?", [userId], (err, card) => {
@@ -123,6 +133,7 @@ app.post("/api/bank/:userId/card", (req, res) => {
     });
 });
 
+// Calcul et ajout des intérêts
 app.post("/api/bank/:userId/interest", (req, res) => {
     const { userId } = req.params;
     db.get("SELECT * FROM users WHERE userId = ?", [userId], (err, user) => {
@@ -142,6 +153,7 @@ app.post("/api/bank/:userId/interest", (req, res) => {
     });
 });
 
+// Classement des plus riches
 app.get("/api/bank/top", (req, res) => {
     const limit = parseInt(req.query.limit) || 25;
     db.all("SELECT userId, bank FROM users ORDER BY bank DESC LIMIT ?", [limit], (err, rows) => {
@@ -150,6 +162,7 @@ app.get("/api/bank/top", (req, res) => {
     });
 });
 
+// Historique des transactions
 app.get("/api/bank/:userId/transactions", (req, res) => {
     const { userId } = req.params;
     const limit = parseInt(req.query.limit) || 20;
@@ -159,6 +172,7 @@ app.get("/api/bank/:userId/transactions", (req, res) => {
     });
 });
 
+// Création d'un code de parrainage
 app.post("/api/bank/:userId/parrain/create", (req, res) => {
     const { userId } = req.params;
     const code = userId.slice(-6) + random(100, 999);
@@ -168,6 +182,7 @@ app.post("/api/bank/:userId/parrain/create", (req, res) => {
     });
 });
 
+// Utilisation d'un code de parrainage
 app.post("/api/bank/:userId/parrain/use", (req, res) => {
     const { userId } = req.params;
     const { code } = req.body;
@@ -177,7 +192,7 @@ app.post("/api/bank/:userId/parrain/use", (req, res) => {
         if (parrain.userId === userId) return res.json({ success: false, error: "Vous ne pouvez pas utiliser votre propre code" });
         db.get("SELECT parrainUsed FROM parrainage WHERE userId = ?", [userId], (e, p) => {
             if (e) return res.status(500).json({ error: e.message });
-            if (p && p.parrainUsed) return res.json({ success: false, error: "Vous avez deja utilise un code" });
+            if (p && p.parrainUsed) return res.json({ success: false, error: "Vous avez déjà utilisé un code" });
             const bonusParraine = 10000;
             const bonusParrain = 5000;
             db.run("UPDATE parrainage SET parrainUsed = 1, parrainId = ? WHERE userId = ?", [parrain.userId, userId]);
@@ -190,6 +205,7 @@ app.post("/api/bank/:userId/parrain/use", (req, res) => {
     });
 });
 
+// Loterie
 app.post("/api/bank/:userId/lottery", (req, res) => {
     const { userId } = req.params;
     const { ticketPrice } = req.body;
@@ -220,6 +236,7 @@ app.post("/api/bank/:userId/lottery", (req, res) => {
     });
 });
 
+// Jeu de hasard (pile ou face)
 app.post("/api/bank/:userId/gamble", (req, res) => {
     const { userId } = req.params;
     const { amount, choice } = req.body;
@@ -248,6 +265,7 @@ app.post("/api/bank/:userId/gamble", (req, res) => {
     });
 });
 
+// Transfert d'argent entre utilisateurs
 app.post("/api/bank/:userId/transfer", (req, res) => {
     const { userId } = req.params;
     const { targetId, amount, cvv } = req.body;
@@ -263,6 +281,7 @@ app.post("/api/bank/:userId/transfer", (req, res) => {
             db.get("SELECT userId FROM users WHERE userId = ?", [targetId], (e2, receiver) => {
                 if (e2) return res.status(500).json({ error: e2.message });
                 if (!receiver) {
+                    // Création automatique du compte destinataire s'il n'existe pas
                     db.run("INSERT INTO users (userId, bank) VALUES (?, ?)", [targetId, 0]);
                     db.run("INSERT INTO cards (userId) VALUES (?)", [targetId]);
                     db.run("INSERT INTO parrainage (userId) VALUES (?)", [targetId]);
@@ -283,4 +302,5 @@ app.post("/api/bank/:userId/transfer", (req, res) => {
     });
 });
 
+// Démarrage du serveur
 app.listen(PORT, () => console.log(`Bank API running on port ${PORT}`));
