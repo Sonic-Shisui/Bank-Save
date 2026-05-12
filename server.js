@@ -10,15 +10,16 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-const dbPath = path.join(__dirname, "database", "bank.db");
-const dbDir = path.dirname(dbPath);
-if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+const DB_DIR = process.env.DB_DIR || "/data";
+const dbPath = path.join(DB_DIR, "bank.db");
+
+if (!fs.existsSync(DB_DIR)) {
+  fs.mkdirSync(DB_DIR, { recursive: true });
+}
 
 const db = new sqlite3.Database(dbPath);
 
-// =========== Initialisation des tables (champs TEXT pour les montants) ===========
 db.serialize(() => {
-  // users : bank et lastInterestClaimed (lastInterestClaimed reste INTEGER pour timestamp)
   db.run(`CREATE TABLE IF NOT EXISTS users (
     userId TEXT PRIMARY KEY,
     bank TEXT DEFAULT '0',
@@ -60,20 +61,16 @@ db.serialize(() => {
   )`);
 });
 
-// =========== Utilitaires BigInt ===========
 function toBigInt(value) {
-  // Convertit une valeur (string, number, bigint) en bigint
   if (typeof value === 'bigint') return value;
   if (value === undefined || value === null) return 0n;
   return BigInt(String(value));
 }
 
 function formatBigInt(value) {
-  // Retourne la chaîne décimale sans perte
   return value.toString();
 }
 
-// =========== Gestion des utilisateurs ===========
 function ensureUserExists(userId, callback) {
   db.run("INSERT OR IGNORE INTO users (userId, bank) VALUES (?, '0')", [userId], (err) => {
     if (err) return callback(err);
@@ -84,9 +81,6 @@ function ensureUserExists(userId, callback) {
   });
 }
 
-// =========== Routes ===========
-
-// GET /api/bank/:userId
 app.get("/api/bank/:userId", (req, res) => {
   const { userId } = req.params;
   ensureUserExists(userId, (err) => {
@@ -95,14 +89,12 @@ app.get("/api/bank/:userId", (req, res) => {
       if (e) return res.status(500).json({ error: e.message });
       db.get("SELECT * FROM cards WHERE userId = ?", [userId], (err, card) => {
         if (err) return res.status(500).json({ error: err.message });
-        // Convert bank en string (déjà stocké en TEXT)
         res.json({ success: true, data: { ...user, card: card || null } });
       });
     });
   });
 });
 
-// POST /api/bank/:userId/deposit (dépôt depuis cb)
 app.post("/api/bank/:userId/deposit", (req, res) => {
   const { userId } = req.params;
   let { amount, cvv } = req.body;
@@ -132,7 +124,6 @@ app.post("/api/bank/:userId/deposit", (req, res) => {
   });
 });
 
-// POST /api/bank/:userId/withdraw
 app.post("/api/bank/:userId/withdraw", (req, res) => {
   const { userId } = req.params;
   let { amount, cvv } = req.body;
@@ -165,7 +156,6 @@ app.post("/api/bank/:userId/withdraw", (req, res) => {
   });
 });
 
-// POST /api/bank/:userId/card (création carte)
 app.post("/api/bank/:userId/card", (req, res) => {
   const { userId } = req.params;
   ensureUserExists(userId, (err) => {
@@ -193,7 +183,6 @@ app.post("/api/bank/:userId/card", (req, res) => {
   });
 });
 
-// POST /api/bank/:userId/interest
 app.post("/api/bank/:userId/interest", (req, res) => {
   const { userId } = req.params;
   ensureUserExists(userId, (err) => {
@@ -204,17 +193,13 @@ app.post("/api/bank/:userId/interest", (req, res) => {
       if (currentBank <= 0n) {
         return res.json({ success: false, error: "Aucun argent" });
       }
-      const interestRate = 0.001; // 0.1% par jour ? l'ancien code utilisait /970/secondes
+      const interestRate = 0.001;
       const lastInterest = user.lastInterestClaimed || Date.now();
       const now = Date.now();
       const secondsDiff = (now - lastInterest) / 1000;
-      // Intérêt = bank * (interestRate / 970) * secondsDiff (selon l'original)
-      // On calcule en BigInt pour éviter les flottants. On va utiliser des nombres décimaux avec une précision suffisante.
-      // Pour éviter les pertes, on multiplie par un facteur (1000000) puis on divise.
       const factor = 1000000n;
-      const rateNum = Math.floor(interestRate * 1000000); // 0.001 => 1000
+      const rateNum = Math.floor(interestRate * 1000000);
       const bankNum = currentBank;
-      // (bankNum * rateNum * secondsDiff) / (970 * factor)
       let interest = (bankNum * BigInt(rateNum) * BigInt(Math.floor(secondsDiff))) / (970n * factor);
       interest = interest > 0n ? interest : 0n;
       if (interest > 0n) {
@@ -231,14 +216,10 @@ app.post("/api/bank/:userId/interest", (req, res) => {
   });
 });
 
-// GET /api/bank/top
 app.get("/api/bank/top", (req, res) => {
   const limit = parseInt(req.query.limit) || 25;
-  db.all("SELECT userId, bank FROM users ORDER BY CAST(bank AS INTEGER) DESC LIMIT ?", [limit], (err, rows) => {
-    // Attention : ORDER BY CAST ne fonctionne que pour des nombres relativement petits (inférieurs à 9e18), car SQLite convertit en INTEGER limité.
-    // Pour un tri correct avec des BigInt, il faudrait trier en JavaScript.
+  db.all("SELECT userId, bank FROM users", [], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
-    // On trie avec BigInt côté serveur
     rows.sort((a, b) => {
       const bigA = toBigInt(a.bank);
       const bigB = toBigInt(b.bank);
@@ -248,7 +229,6 @@ app.get("/api/bank/top", (req, res) => {
   });
 });
 
-// GET /api/bank/:userId/transactions
 app.get("/api/bank/:userId/transactions", (req, res) => {
   const { userId } = req.params;
   const limit = parseInt(req.query.limit) || 20;
@@ -258,7 +238,6 @@ app.get("/api/bank/:userId/transactions", (req, res) => {
   });
 });
 
-// POST /api/bank/:userId/parrain/create
 app.post("/api/bank/:userId/parrain/create", (req, res) => {
   const { userId } = req.params;
   ensureUserExists(userId, (err) => {
@@ -272,7 +251,6 @@ app.post("/api/bank/:userId/parrain/create", (req, res) => {
   });
 });
 
-// POST /api/bank/:userId/parrain/use
 app.post("/api/bank/:userId/parrain/use", (req, res) => {
   const { userId } = req.params;
   const { code } = req.body;
@@ -287,9 +265,7 @@ app.post("/api/bank/:userId/parrain/use", (req, res) => {
         if (p && p.parrainUsed) return res.json({ success: false, error: "Vous avez déjà utilisé un code" });
         const bonusParraine = 10000n;
         const bonusParrain = 5000n;
-        // Mise à jour du parrainé
         db.run("UPDATE parrainage SET parrainUsed = 1, parrainId = ? WHERE userId = ?", [parrain.userId, userId]);
-        // Mise à jour du parrain : incrémenter gains
         db.get("SELECT parrainGains FROM parrainage WHERE userId = ?", [parrain.userId], (e2, pdata) => {
           if (e2) return res.status(500).json({ error: e2.message });
           const currentGains = toBigInt(pdata.parrainGains);
@@ -297,7 +273,6 @@ app.post("/api/bank/:userId/parrain/use", (req, res) => {
           db.run("UPDATE parrainage SET parrainCount = parrainCount + 1, parrainGains = ? WHERE userId = ?",
             [formatBigInt(newGains), parrain.userId]);
         });
-        // Ajout argent aux deux comptes (users)
         db.get("SELECT bank FROM users WHERE userId = ?", [userId], (e3, userParraine) => {
           if (e3) return res.status(500).json({ error: e3.message });
           const oldParraine = toBigInt(userParraine.bank);
@@ -318,7 +293,6 @@ app.post("/api/bank/:userId/parrain/use", (req, res) => {
   });
 });
 
-// POST /api/bank/:userId/lottery
 app.post("/api/bank/:userId/lottery", (req, res) => {
   const { userId } = req.params;
   let { ticketPrice } = req.body;
@@ -344,7 +318,6 @@ app.post("/api/bank/:userId/lottery", (req, res) => {
       if (matchCount === 3) { win = true; multiplier = 100; winAmount = price * 100n; }
       else if (matchCount === 2) { win = true; multiplier = 10; winAmount = price * 10n; }
       else if (matchCount === 1) { win = true; multiplier = 2; winAmount = price * 2n; }
-      // Déduire le prix du ticket
       let newBank = currentBank - price;
       if (win) newBank = newBank + winAmount;
       db.run("UPDATE users SET bank = ? WHERE userId = ?", [formatBigInt(newBank), userId]);
@@ -362,7 +335,6 @@ app.post("/api/bank/:userId/lottery", (req, res) => {
   });
 });
 
-// POST /api/bank/:userId/gamble
 app.post("/api/bank/:userId/gamble", (req, res) => {
   const { userId } = req.params;
   let { amount, choice } = req.body;
@@ -397,7 +369,6 @@ app.post("/api/bank/:userId/gamble", (req, res) => {
   });
 });
 
-// POST /api/bank/:userId/transfer
 app.post("/api/bank/:userId/transfer", (req, res) => {
   const { userId } = req.params;
   let { targetId, amount, cvv } = req.body;
@@ -438,6 +409,10 @@ app.post("/api/bank/:userId/transfer", (req, res) => {
       });
     });
   });
+});
+
+app.get("/", (req, res) => {
+  res.json({ message: "Hedgehog Bank API is running", version: "3.0", status: "online" });
 });
 
 app.listen(PORT, () => console.log(`Bank API running on port ${PORT}`));
