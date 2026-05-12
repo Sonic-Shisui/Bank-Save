@@ -10,7 +10,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-const DB_DIR = process.env.DB_DIR || "/data";
+const DB_DIR = path.join(__dirname, "data");
 const dbPath = path.join(DB_DIR, "bank.db");
 
 if (!fs.existsSync(DB_DIR)) {
