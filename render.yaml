@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: bank-save
+    runtime: node
+    repo: https://github.com/Ismael04-lag/bank-save
+    plan: free
+    envVars:
+      - key: DB_DIR
+        value: /data
+    disk:
+      name: bank-data
+      mountPath: /data
+      sizeGB: 1
