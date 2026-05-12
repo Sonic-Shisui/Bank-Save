@@ -1,11 +1,8 @@
 {
-  "name": "bank-save",
+  "name": "hedgehog-bank-api",
   "version": "3.0.0",
   "description": "Bank API for Hedgehog Bot",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
+  "main": "api/server.js.js",
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
