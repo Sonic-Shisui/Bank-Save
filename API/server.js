@@ -1,10 +1,12 @@
 const express = require("express");
 const cors = require("cors");
-const { kv } = require("@vercel/kv");
+const { Redis } = require("@upstash/redis");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+const kv = Redis.fromEnv();
 
 const USER_PREFIX = "bank:user:";
 const CARD_PREFIX = "bank:card:";
@@ -70,7 +72,7 @@ async function addTransaction(userId, type, amount, details = {}) {
 }
 
 app.get("/", (req, res) => {
-    res.json({ message: "Hedgehog Bank API", version: "5.0", status: "online" });
+    res.json({ message: "Hedgehog Bank API", version: "5.0", status: "online", storage: "Upstash Redis" });
 });
 
 app.get("/api/bank/top", async (req, res) => {
