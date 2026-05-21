@@ -1,6 +1,6 @@
 const express = require("express");
-const cors    = require("cors");
-const { kv }  = require("@vercel/kv");
+const cors = require("cors");
+const { kv } = require("@vercel/kv");
 
 const app = express();
 app.use(cors());
@@ -8,7 +8,7 @@ app.use(express.json());
 
 const USER_PREFIX = "bank:user:";
 const CARD_PREFIX = "bank:card:";
-const TX_PREFIX   = "bank:tx:";
+const TX_PREFIX = "bank:tx:";
 
 function toBigInt(value) {
     if (typeof value === "bigint") return value;
@@ -63,18 +63,18 @@ async function addTransaction(userId, type, amount, details = {}) {
 }
 
 app.get("/", (req, res) => {
-    res.json({ message: "Hedgehog Bank API", version: "4.0", status: "online" });
+    res.json({ message: "Hedgehog Bank API", version: "4.1", status: "online" });
 });
 
 app.get("/api/bank/top", async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit) || 25, 100);
-        const keys  = await kv.keys(`${USER_PREFIX}*`);
+        const keys = await kv.keys(`${USER_PREFIX}*`);
         const users = [];
         for (const key of keys) {
             const userId = key.replace(USER_PREFIX, "");
             try {
-                const raw  = await kv.get(key);
+                const raw = await kv.get(key);
                 const data = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : { bank: "0" };
                 users.push({ userId, bank: fmt(data.bank || "0") });
             } catch(e) {
@@ -106,7 +106,9 @@ app.post("/api/bank/:userId/card", async (req, res) => {
     try {
         const { userId } = req.params;
         let card = await getUserCard(userId);
-        if (card?.cardCreated) return res.json({ success: true, data: card });
+        if (card && card.cardCreated) {
+            return res.json({ success: true, data: card });
+        }
         const cardNumber = `4532 ${rand(1000,9999)} ${rand(1000,9999)} ${rand(1000,9999)}`;
         const expiry = new Date();
         expiry.setFullYear(expiry.getFullYear() + 4);
@@ -125,8 +127,9 @@ app.post("/api/bank/:userId/deposit", async (req, res) => {
         const { userId } = req.params;
         let { amount, cvv } = req.body;
         amount = String(amount || "").trim();
-        if (!/^\d+$/.test(amount) || amount === "0")
+        if (!/^\d+$/.test(amount) || amount === "0") {
             return res.status(400).json({ success: false, error: "Montant invalide" });
+        }
         const card = await getUserCard(userId);
         if (!card) return res.json({ success: false, error: "Aucune carte associée" });
         if (card.cardCvv !== cvv) return res.json({ success: false, error: "CVV incorrect" });
@@ -145,8 +148,9 @@ app.post("/api/bank/:userId/withdraw", async (req, res) => {
         const { userId } = req.params;
         let { amount, cvv } = req.body;
         amount = String(amount || "").trim();
-        if (!/^\d+$/.test(amount) || amount === "0")
+        if (!/^\d+$/.test(amount) || amount === "0") {
             return res.status(400).json({ success: false, error: "Montant invalide" });
+        }
         const card = await getUserCard(userId);
         if (!card) return res.json({ success: false, error: "Aucune carte associée" });
         if (card.cardCvv !== cvv) return res.json({ success: false, error: "CVV incorrect" });
@@ -168,10 +172,12 @@ app.post("/api/bank/:userId/transfer", async (req, res) => {
         const { userId } = req.params;
         let { targetId, amount, cvv } = req.body;
         amount = String(amount || "").trim();
-        if (!/^\d+$/.test(amount) || amount === "0")
+        if (!/^\d+$/.test(amount) || amount === "0") {
             return res.status(400).json({ success: false, error: "Montant invalide" });
-        if (!targetId || targetId === userId)
+        }
+        if (!targetId || targetId === userId) {
             return res.status(400).json({ success: false, error: "Cible invalide" });
+        }
         const card = await getUserCard(userId);
         if (!card) return res.json({ success: false, error: "Aucune carte associée" });
         if (card.cardCvv !== cvv) return res.json({ success: false, error: "CVV incorrect" });
@@ -180,12 +186,12 @@ app.post("/api/bank/:userId/transfer", async (req, res) => {
         const senderBal = toBigInt(sender.bank);
         const amt = toBigInt(amount);
         if (senderBal < amt) return res.json({ success: false, error: "Solde insuffisant" });
-        sender.bank   = fmt(senderBal - amt);
+        sender.bank = fmt(senderBal - amt);
         receiver.bank = fmt(toBigInt(receiver.bank) + amt);
-        await setUserData(userId,   sender);
+        await setUserData(userId, sender);
         await setUserData(targetId, receiver);
-        await addTransaction(userId,   "transfer_sent",     fmt(-amt), { targetId, amount });
-        await addTransaction(targetId, "transfer_received", amount,    { senderId: userId, amount });
+        await addTransaction(userId, "transfer_sent", fmt(-amt), { targetId, amount });
+        await addTransaction(targetId, "transfer_received", amount, { senderId: userId, amount });
         res.json({ success: true, newBalance: sender.bank, targetId, amount });
     } catch(e) {
         res.status(500).json({ success: false, error: e.message });
@@ -197,10 +203,12 @@ app.post("/api/bank/:userId/rob", async (req, res) => {
         const { userId } = req.params;
         let { targetId, amount } = req.body;
         amount = String(amount || "").trim();
-        if (!/^\d+$/.test(amount) || amount === "0")
+        if (!/^\d+$/.test(amount) || amount === "0") {
             return res.status(400).json({ success: false, error: "Montant invalide" });
-        if (!targetId || targetId === userId)
+        }
+        if (!targetId || targetId === userId) {
             return res.status(400).json({ success: false, error: "Cible invalide" });
+        }
         const victim = await getUserData(targetId);
         const victimBal = toBigInt(victim.bank);
         const robAmt = toBigInt(amount);
@@ -209,9 +217,9 @@ app.post("/api/bank/:userId/rob", async (req, res) => {
         const robber = await getUserData(userId);
         robber.bank = fmt(toBigInt(robber.bank) + robAmt);
         victim.bank = fmt(victimBal - robAmt);
-        await setUserData(userId,   robber);
+        await setUserData(userId, robber);
         await setUserData(targetId, victim);
-        await addTransaction(userId,   "rob_sent",     fmt(robAmt),  { targetId });
+        await addTransaction(userId, "rob_sent", fmt(robAmt), { targetId });
         await addTransaction(targetId, "rob_received", fmt(-robAmt), { senderId: userId });
         res.json({ success: true, newBalance: robber.bank, robbed: fmt(robAmt) });
     } catch(e) {
@@ -243,10 +251,12 @@ app.post("/api/bank/:userId/gamble", async (req, res) => {
         const { userId } = req.params;
         let { amount, choice } = req.body;
         amount = String(amount || "").trim();
-        if (!/^\d+$/.test(amount) || amount === "0")
+        if (!/^\d+$/.test(amount) || amount === "0") {
             return res.status(400).json({ success: false, error: "Montant invalide" });
-        if (!["pile","face"].includes(choice))
+        }
+        if (!["pile","face"].includes(choice)) {
             return res.status(400).json({ success: false, error: "Choix invalide" });
+        }
         const user = await getUserData(userId);
         const bal = toBigInt(user.bank);
         const bet = toBigInt(amount);
@@ -267,17 +277,33 @@ app.post("/api/bank/:userId/lottery", async (req, res) => {
         const { userId } = req.params;
         let { ticketPrice } = req.body;
         ticketPrice = String(ticketPrice || "").trim();
-        if (!/^\d+$/.test(ticketPrice) || ticketPrice === "0")
+        if (!/^\d+$/.test(ticketPrice) || ticketPrice === "0") {
             return res.status(400).json({ success: false, error: "Montant invalide" });
-        const userNumbers  = [rand(1,10), rand(1,10), rand(1,10)];
-        const drawnNumbers = [rand(1,10), rand(1,10), rand(1,10)];
-        const matchCount   = userNumbers.filter((n, i) => n === drawnNumbers[i]).length;
-        const isJackpot    = matchCount === 3 && Math.random() < 0.01;
-        const multiplier   = { 0:0, 1:0, 2:2, 3: isJackpot ? 100 : 10 }[matchCount];
-        const win          = multiplier > 0;
-        const ticket       = toBigInt(ticketPrice);
-        const winAmount    = win ? ticket * BigInt(multiplier) : 0n;
-        res.json({ success: true, win, userNumbers, drawnNumbers, matchCount, multiplier, winAmount: fmt(winAmount) });
+        }
+        const userNumbers = [rand(1,9), rand(1,9), rand(1,9)];
+        const drawnNumbers = [rand(1,9), rand(1,9), rand(1,9)];
+        let matchCount = 0;
+        for (let i = 0; i < 3; i++) {
+            if (userNumbers[i] === drawnNumbers[i]) matchCount++;
+        }
+        let multiplier = 0;
+        if (matchCount === 3) multiplier = 100;
+        else if (matchCount === 2) multiplier = 10;
+        else if (matchCount === 1) multiplier = 2;
+        const win = multiplier > 0;
+        const ticket = toBigInt(ticketPrice);
+        const winAmount = win ? ticket * BigInt(multiplier) : 0n;
+        const user = await getUserData(userId);
+        if (ticket > toBigInt(user.bank)) {
+            return res.json({ success: false, error: "Solde insuffisant" });
+        }
+        user.bank = fmt(toBigInt(user.bank) - ticket);
+        if (win) {
+            user.bank = fmt(toBigInt(user.bank) + winAmount);
+        }
+        await setUserData(userId, user);
+        await addTransaction(userId, win ? "lottery_win" : "lottery_lose", win ? fmt(winAmount) : fmt(-ticket));
+        res.json({ success: true, win, userNumbers, drawnNumbers, matchCount, multiplier, winAmount: fmt(winAmount), newBalance: user.bank });
     } catch(e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -322,13 +348,13 @@ app.post("/api/bank/:userId/parrain/use", async (req, res) => {
         const ownerId = await kv.get(`bank:parrain:code:${code}`);
         if (!ownerId) return res.json({ success: false, error: "Code invalide" });
         if (ownerId === userId) return res.json({ success: false, error: "Vous ne pouvez pas utiliser votre propre code" });
-        const BONUS_USER  = 10000n;
+        const BONUS_USER = 10000n;
         const BONUS_OWNER = 5000n;
-        const userD  = await getUserData(userId);
+        const userD = await getUserData(userId);
         const ownerD = await getUserData(ownerId);
-        userD.bank  = fmt(toBigInt(userD.bank)  + BONUS_USER);
+        userD.bank = fmt(toBigInt(userD.bank) + BONUS_USER);
         ownerD.bank = fmt(toBigInt(ownerD.bank) + BONUS_OWNER);
-        await setUserData(userId,  userD);
+        await setUserData(userId, userD);
         await setUserData(ownerId, ownerD);
         await kv.set(`bank:parrain:used:${userId}`, code);
         const op = await kv.get(`bank:parrain:user:${ownerId}`);
@@ -338,7 +364,7 @@ app.post("/api/bank/:userId/parrain/use", async (req, res) => {
             d.gains = fmt(toBigInt(d.gains) + BONUS_OWNER);
             await kv.set(`bank:parrain:user:${ownerId}`, JSON.stringify(d));
         }
-        await addTransaction(userId,  "parrain_bonus",    fmt(BONUS_USER),  { code });
+        await addTransaction(userId, "parrain_bonus", fmt(BONUS_USER), { code });
         await addTransaction(ownerId, "parrain_referral", fmt(BONUS_OWNER), { referredUser: userId });
         res.json({ success: true, bonusUser: fmt(BONUS_USER), bonusOwner: fmt(BONUS_OWNER), newBalance: userD.bank });
     } catch(e) {
