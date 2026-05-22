@@ -36,10 +36,10 @@ function rand(min, max) {
 async function getUserData(userId) {
     try {
         const raw = await kv.get(`${USER_PREFIX}${userId}`);
-        if (!raw) return { userId, bank: "0", lastInterestClaimed: Date.now(), imageMode: true };
+        if (!raw) return { userId, bank: "0", lastInterestClaimed: Date.now(), imageMode: true, dailyStreak: 0, totalInvested: "0", parrainCount: 0, lastDaily: 0, savings: { amount: "0", releaseDate: 0 }, loans: [] };
         return typeof raw === "string" ? JSON.parse(raw) : raw;
     } catch(e) {
-        return { userId, bank: "0", lastInterestClaimed: Date.now(), imageMode: true };
+        return { userId, bank: "0", lastInterestClaimed: Date.now(), imageMode: true, dailyStreak: 0, totalInvested: "0", parrainCount: 0, lastDaily: 0, savings: { amount: "0", releaseDate: 0 }, loans: [] };
     }
 }
 
@@ -66,13 +66,13 @@ async function addTransaction(userId, type, amount, details = {}) {
         const existing = await kv.get(key);
         let txs = existing ? (typeof existing === "string" ? JSON.parse(existing) : existing) : [];
         txs.unshift({ id: Date.now(), type, amount: fmt(amount), date: Date.now(), details });
-        if (txs.length > 50) txs = txs.slice(0, 50);
+        if (txs.length > 100) txs = txs.slice(0, 100);
         await kv.set(key, JSON.stringify(txs));
     } catch(e) {}
 }
 
 app.get("/", (req, res) => {
-    res.json({ message: "Hedgehog Bank API", version: "5.0", status: "online", storage: "Upstash Redis" });
+    res.json({ message: "Hedgehog Bank API", version: "6.0", status: "online", storage: "Upstash Redis" });
 });
 
 app.get("/api/bank/top", async (req, res) => {
@@ -92,6 +92,32 @@ app.get("/api/bank/top", async (req, res) => {
         }
         users.sort((a, b) => {
             const diff = toBigInt(b.bank) - toBigInt(a.bank);
+            return diff > 0n ? 1 : diff < 0n ? -1 : 0;
+        });
+        res.json({ success: true, data: users.slice(0, limit) });
+    } catch(e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get("/api/bank/leaderboard", async (req, res) => {
+    try {
+        const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+        const keys = await kv.keys(`${USER_PREFIX}*`);
+        const users = [];
+        for (const key of keys) {
+            const userId = key.replace(USER_PREFIX, "");
+            try {
+                const raw = await kv.get(key);
+                const data = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : { totalInvested: "0" };
+                const totalInvested = fmt(data.totalInvested || "0");
+                if (toBigInt(totalInvested) > 0n) {
+                    users.push({ userId, totalInvested });
+                }
+            } catch(e) {}
+        }
+        users.sort((a, b) => {
+            const diff = toBigInt(b.totalInvested) - toBigInt(a.totalInvested);
             return diff > 0n ? 1 : diff < 0n ? -1 : 0;
         });
         res.json({ success: true, data: users.slice(0, limit) });
@@ -323,7 +349,7 @@ app.post("/api/bank/:userId/lottery", async (req, res) => {
 app.get("/api/bank/:userId/transactions", async (req, res) => {
     try {
         const { userId } = req.params;
-        const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+        const limit = Math.min(parseInt(req.query.limit) || 20, 100);
         const raw = await kv.get(`${TX_PREFIX}${userId}`);
         const txs = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : [];
         res.json({ success: true, data: txs.slice(0, limit) });
@@ -365,6 +391,7 @@ app.post("/api/bank/:userId/parrain/use", async (req, res) => {
         const ownerD = await getUserData(ownerId);
         userD.bank = fmt(toBigInt(userD.bank) + BONUS_USER);
         ownerD.bank = fmt(toBigInt(ownerD.bank) + BONUS_OWNER);
+        ownerD.parrainCount = (ownerD.parrainCount || 0) + 1;
         await setUserData(userId, userD);
         await setUserData(ownerId, ownerD);
         await kv.set(`${PARRAIN_USED_PREFIX}${userId}`, code);
@@ -409,6 +436,153 @@ app.post("/api/bank/:userId/image", async (req, res) => {
     } catch(e) {
         res.status(500).json({ success: false, error: e.message });
     }
+});
+
+app.post("/api/bank/:userId/daily", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const user = await getUserData(userId);
+        const now = Date.now();
+        const dayMs = 86400000;
+        if (now - (user.lastDaily || 0) < dayMs) {
+            return res.json({ success: false, error: "Bonus déjà réclamé aujourd'hui" });
+        }
+        let streak = user.dailyStreak || 0;
+        if (now - (user.lastDaily || 0) > dayMs * 2) streak = 0;
+        streak++;
+        const reward = 1000n * BigInt(Math.min(streak, 30));
+        user.bank = fmt(toBigInt(user.bank) + reward);
+        user.lastDaily = now;
+        user.dailyStreak = streak;
+        await setUserData(userId, user);
+        await addTransaction(userId, "daily_bonus", fmt(reward));
+        res.json({ success: true, reward: fmt(reward), streak, newBalance: user.bank });
+    } catch(e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/bank/:userId/invest", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        let { amount } = req.body;
+        amount = String(amount || "").trim();
+        if (!/^\d+$/.test(amount) || amount === "0") {
+            return res.status(400).json({ success: false, error: "Montant invalide" });
+        }
+        const user = await getUserData(userId);
+        const investAmount = toBigInt(amount);
+        const currentBank = toBigInt(user.bank);
+        if (investAmount > currentBank) {
+            return res.json({ success: false, error: "Solde insuffisant" });
+        }
+        const chance = Math.random();
+        let profit = 0n;
+        if (chance < 0.6) {
+            profit = investAmount * 20n / 100n;
+        } else if (chance < 0.8) {
+            profit = 0n;
+        } else {
+            profit = -investAmount;
+        }
+        user.bank = fmt(currentBank + profit);
+        const totalInvested = toBigInt(user.totalInvested || "0") + investAmount;
+        user.totalInvested = fmt(totalInvested);
+        await setUserData(userId, user);
+        await addTransaction(userId, profit >= 0n ? "investment_win" : "investment_lose", fmt(profit));
+        res.json({ success: true, profit: fmt(profit), newBalance: user.bank, totalInvested: user.totalInvested });
+    } catch(e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/bank/:userId/loan", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        let { amount } = req.body;
+        amount = String(amount || "").trim();
+        if (!/^\d+$/.test(amount) || amount === "0") {
+            return res.status(400).json({ success: false, error: "Montant invalide" });
+        }
+        const user = await getUserData(userId);
+        const loanAmount = toBigInt(amount);
+        const maxLoan = toBigInt(user.bank) * 5n;
+        if (loanAmount > maxLoan) {
+            return res.json({ success: false, error: "Montant maximum d'emprunt dépassé" });
+        }
+        const interest = loanAmount * 10n / 100n;
+        const totalToPay = loanAmount + interest;
+        user.bank = fmt(toBigInt(user.bank) + loanAmount);
+        if (!user.loans) user.loans = [];
+        user.loans.push({ amount: fmt(loanAmount), interest: fmt(interest), total: fmt(totalToPay), date: Date.now(), status: "active" });
+        await setUserData(userId, user);
+        await addTransaction(userId, "loan_taken", fmt(loanAmount));
+        res.json({ success: true, loanAmount: fmt(loanAmount), interest: fmt(interest), totalToPay: fmt(totalToPay), newBalance: user.bank });
+    } catch(e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/bank/:userId/save", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        let { amount } = req.body;
+        amount = String(amount || "").trim();
+        if (!/^\d+$/.test(amount) || amount === "0") {
+            return res.status(400).json({ success: false, error: "Montant invalide" });
+        }
+        const user = await getUserData(userId);
+        const saveAmount = toBigInt(amount);
+        const currentBank = toBigInt(user.bank);
+        if (saveAmount > currentBank) {
+            return res.json({ success: false, error: "Solde insuffisant" });
+        }
+        const currentSavings = toBigInt(user.savings?.amount || "0");
+        user.bank = fmt(currentBank - saveAmount);
+        user.savings = { amount: fmt(currentSavings + saveAmount), releaseDate: Date.now() + 7 * 24 * 60 * 60 * 1000 };
+        await setUserData(userId, user);
+        await addTransaction(userId, "savings_deposit", fmt(saveAmount));
+        res.json({ success: true, savedAmount: fmt(saveAmount), newBalance: user.bank, releaseDate: user.savings.releaseDate });
+    } catch(e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post("/api/bank/:userId/shop/buy", async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { itemId } = req.body;
+        const items = [
+            { name: "VIP", price: 50000000n, desc: "Accès à bank rob" },
+            { name: "Double XP", price: 1000000n, desc: "Double gains pendant 24h" },
+            { name: "Couleur Carte", price: 100000n, desc: "Change la couleur de ta carte" }
+        ];
+        const id = parseInt(itemId);
+        if (isNaN(id) || id < 1 || id > items.length) {
+            return res.status(400).json({ success: false, error: "Article invalide" });
+        }
+        const item = items[id - 1];
+        const user = await getUserData(userId);
+        const price = item.price;
+        if (toBigInt(user.bank) < price) {
+            return res.json({ success: false, error: "Solde insuffisant" });
+        }
+        user.bank = fmt(toBigInt(user.bank) - price);
+        await setUserData(userId, user);
+        await addTransaction(userId, "shop_purchase", fmt(-price), { item: item.name });
+        res.json({ success: true, item: item.name, newBalance: user.bank });
+    } catch(e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get("/api/bank/shop/items", (req, res) => {
+    const items = [
+        { id: 1, name: "VIP", price: 50000000, desc: "Accès à bank rob" },
+        { id: 2, name: "Double XP", price: 1000000, desc: "Double gains pendant 24h" },
+        { id: 3, name: "Couleur Carte", price: 100000, desc: "Change la couleur de ta carte" }
+    ];
+    res.json({ success: true, data: items });
 });
 
 module.exports = app;
